@@ -1,3 +1,5 @@
+"""Streamlit application for validating ads.txt and app-ads.txt entries."""
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -126,6 +128,17 @@ if 'target_order' not in st.session_state:
     st.session_state.target_order = []
 
 def get_session():
+    """Create an HTTP session configured for ads.txt retrieval requests.
+
+    Returns:
+        requests.Session: A session with headers tailored for fetching
+            plain-text ads.txt and app-ads.txt files.
+
+    Examples:
+        >>> session = get_session()
+        >>> session.headers["User-Agent"] == LIVE_UA
+        True
+    """
     s = requests.Session()
     s.headers.update({
         'User-Agent': LIVE_UA,
@@ -135,6 +148,22 @@ def get_session():
     return s
 
 def get_clean_domain(url_input):
+    """Normalize a user-provided URL or hostname into a domain string.
+
+    Args:
+        url_input (str): A hostname or URL entered by the user. If the value
+            omits a scheme, the function prepends ``http://`` before parsing.
+
+    Returns:
+        str: The normalized network location or best-effort hostname extracted
+            from the input string.
+
+    Examples:
+        >>> get_clean_domain("example.com")
+        'example.com'
+        >>> get_clean_domain("https://sub.example.com/path")
+        'sub.example.com'
+    """
     if not url_input.startswith(("http://", "https://")):
         url_input = "http://" + url_input
     try:
@@ -144,6 +173,27 @@ def get_clean_domain(url_input):
         return url_input.strip()
 
 def fetch_file_content(domain, filename):
+    """Fetch an ads.txt-style file from a target domain.
+
+    Args:
+        domain (str): The raw target website or hostname to query.
+        filename (str): The file name to retrieve, typically ``ads.txt`` or
+            ``app-ads.txt``.
+
+    Returns:
+        tuple[str | None, str, bool]: A tuple containing the fetched file
+        content when available, a human-readable status message, and a boolean
+        that indicates whether the request should be treated as an error.
+
+    Examples:
+        >>> content, status, is_error = fetch_file_content("example.com", "ads.txt")
+        >>> isinstance(status, str)
+        True
+
+    Raises:
+        requests.RequestException: Propagated only when an unexpected requests
+            error escapes the internal retry handling logic.
+    """
     session = get_session()
     domain_clean = get_clean_domain(domain)
     
@@ -183,6 +233,21 @@ def fetch_file_content(domain, filename):
     return None, f"Not accessible: {last_error}", True
 
 def parse_ads_file(content):
+    """Parse ads.txt or app-ads.txt content into structured records.
+
+    Args:
+        content (str | None): Raw file content returned from a remote target.
+            Empty values produce an empty result set.
+
+    Returns:
+        list[dict[str, str | None]]: A list of parsed records containing the
+        advertising system domain, seller account ID, and optional account
+        type for each valid non-comment line.
+
+    Examples:
+        >>> parse_ads_file("exchange.com, pub-123, DIRECT\n")
+        [{'domain': 'exchange.com', 'id': 'pub-123', 'type': 'DIRECT'}]
+    """
     parsed_lines = []
     if not content:
         return parsed_lines
@@ -200,6 +265,23 @@ def parse_ads_file(content):
     return parsed_lines
 
 def parse_reference_line(line):
+    """Parse a user-supplied reference rule into a comparable record.
+
+    Args:
+        line (str): A comma-separated reference line containing at least a
+            domain and seller ID, with an optional relationship type.
+
+    Returns:
+        dict[str, str | None] | None: A normalized reference dictionary when
+        the line includes at least two comma-separated values; otherwise,
+        ``None``.
+
+    Examples:
+        >>> parse_reference_line("onetag.com, 5d0d72448d8bfb0, DIRECT")['type']
+        'DIRECT'
+        >>> parse_reference_line("invalid") is None
+        True
+    """
     parts = [p.strip() for p in line.split(',')]
     if len(parts) < 2:
         return None
@@ -211,6 +293,32 @@ def parse_reference_line(line):
     }
 
 def validate_domain(target_domain, filename, references):
+    """Validate a target domain against one or more reference entries.
+
+    Args:
+        target_domain (str): The website whose ``ads.txt`` or ``app-ads.txt``
+            file should be checked.
+        filename (str): The file name to validate, such as ``ads.txt`` or
+            ``app-ads.txt``.
+        references (list[dict[str, str | None]]): Parsed reference entries to
+            match against the remote file content. Each dictionary is expected
+            to contain ``domain``, ``id``, ``type``, and ``original`` keys.
+
+    Returns:
+        list[dict[str, str]]: A result row for every reference entry, including
+        the target URL, checked file name, match outcome, explanatory details,
+        and the original reference string.
+
+    Examples:
+        >>> refs = [{
+        ...     'domain': 'exchange.com',
+        ...     'id': 'pub-123',
+        ...     'type': 'DIRECT',
+        ...     'original': 'exchange.com, pub-123, DIRECT',
+        ... }]
+        >>> isinstance(validate_domain('example.com', 'ads.txt', refs), list)
+        True
+    """
     content, status_msg, is_error = fetch_file_content(target_domain, filename)
     results = []
     
@@ -393,6 +501,19 @@ if st.session_state.all_results_raw is not None:
     final_df = final_df.sort_values('SortIndex').drop(columns=['SortIndex'])
     
     def classify_error(row):
+        """Map a result row to a UI filter category.
+
+        Args:
+            row (pd.Series): A DataFrame row containing at least ``Result`` and
+                ``Details`` fields.
+
+        Returns:
+            str: The display category used by the error filter multiselect.
+
+        Examples:
+            >>> classify_error(pd.Series({'Result': 'Valid', 'Details': 'Full match'}))
+            'Valid'
+        """
         r = row['Result']
         d = row['Details']
         
@@ -419,6 +540,18 @@ if st.session_state.all_results_raw is not None:
         st.info("No results to display.")
     else:
         def color_status(val):
+            """Return a CSS style string for a result status value.
+
+            Args:
+                val (str): The result label displayed in the output table.
+
+            Returns:
+                str: A CSS declaration string used by pandas styling.
+
+            Examples:
+                >>> color_status('Valid')
+                'background-color: #21aeb3; color: white'
+            """
             if val == "Valid":
                 return 'background-color: #21aeb3; color: white' 
             elif val == "Partially matched":
