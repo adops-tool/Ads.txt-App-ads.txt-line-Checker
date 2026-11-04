@@ -117,7 +117,7 @@ flowchart TD
 ```
 
 > [!NOTE]
-> Thread pool concurrency is currently capped in code (`MAX_WORKERS = 5`) to balance throughput and endpoint friendliness.
+> Thread pool concurrency defaults to `MAX_WORKERS = 16` (configurable via `ADS_CHECKER_MAX_WORKERS`) and deduplicates shared hostnames per batch to maximize throughput without redundant endpoint requests.
 
 ## Getting Started
 
@@ -288,21 +288,26 @@ This project is primarily configured through runtime UI choices and a few hard-c
 - **Layout:** vertical or horizontal aggregated
 - **Error Filters:** category-level toggles when warning/error-only mode is enabled
 
-### Hard-Coded Operational Parameters (`app.py`)
+### Operational Defaults & Environment Variables (`app.py`)
 
-- `MAX_WORKERS = 5`
+Operational and security limits ship with production-ready defaults and can be overridden via environment variables without modifying code:
+
+- `ADS_CHECKER_MAX_WORKERS` (default `16`, bounded `1..64`)
   - Controls concurrent domain processing.
-- `timeout=15`
-  - HTTP request timeout in seconds.
-- `time.sleep(random.uniform(0.5, 1.5))`
-  - Per-request jitter to reduce burst pressure.
-- `LIVE_UA = "Mozilla/5.0 ..."`
-  - User-Agent used for remote fetch requests.
-
-### Environment Variables
-
-- No mandatory environment variables are currently required.
-- If you deploy with Streamlit server flags, manage host/port via CLI args or Streamlit config.
+- `ADS_CHECKER_CONNECT_TIMEOUT` (default `5`) / `ADS_CHECKER_READ_TIMEOUT` (default `10`)
+  - TCP connect and per-read socket timeouts in seconds.
+- `ADS_CHECKER_TOTAL_TIMEOUT` (default `20`)
+  - Wall-clock deadline per request chain (including redirects and streaming).
+- `ADS_CHECKER_MAX_REDIRECTS` (default `5`)
+  - Maximum validated HTTP/HTTPS redirect hops per request.
+- `ADS_CHECKER_MAX_RESPONSE_BYTES` (default `10485760` / 10 MiB)
+  - Maximum response payload size streamed into memory.
+- `ADS_CHECKER_MAX_TARGETS` (default `5000`) / `ADS_CHECKER_MAX_REFERENCES` (default `2000`)
+  - Batch size guardrails per validation run.
+- `ADS_CHECKER_ALLOW_INSECURE_SSL` (default `true`)
+  - Enables or disables the `verify=False` retry fallback (`OK (SSL Warning)`).
+- `ADS_CHECKER_TRUST_ENV` (default `false`)
+  - Controls whether `requests` reads proxy/CA/netrc settings from the host environment.
 
 ### Streamlit Server Flags (Example)
 
